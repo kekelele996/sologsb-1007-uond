@@ -20,6 +20,7 @@ const segment = (
   flags: Partial<Segment["flags"]> = {},
   tagIds: string[] = [],
   reviewed = false,
+  intervieweeId?: string,
 ): Segment => ({
   id,
   start,
@@ -36,6 +37,7 @@ const segment = (
   },
   tagIds,
   comments: [],
+  intervieweeId,
 });
 
 export const createSeedProject = (): ProjectData => {
@@ -57,6 +59,10 @@ export const createSeedProject = (): ProjectData => {
   ];
   const tags = [...topics, ...events, ...people];
   const byLabel = (label: string) => tags.find((tag) => tag.label === label)?.id ?? "";
+
+  const now = new Date().toISOString();
+  const IV_LIN = "iv-lin";
+  const IV_CHEN = "iv-chen";
 
   return {
     id: "oral-history-1007",
@@ -87,6 +93,7 @@ export const createSeedProject = (): ProjectData => {
             {},
             [byLabel("码头生活")],
             true,
+            IV_LIN,
           ),
           segment(
             "seg-2",
@@ -97,6 +104,8 @@ export const createSeedProject = (): ProjectData => {
             3,
             { dialect: true, properNoun: true },
             [byLabel("码头生活")],
+            false,
+            IV_LIN,
           ),
           segment(
             "seg-3",
@@ -108,6 +117,7 @@ export const createSeedProject = (): ProjectData => {
             { lowConfidence: true, properNoun: true },
             [byLabel("家族迁徙"), byLabel("1938 年逃难"), byLabel("林有德")],
             true,
+            IV_LIN,
           ),
           segment(
             "seg-4",
@@ -118,6 +128,8 @@ export const createSeedProject = (): ProjectData => {
             5,
             {},
             [byLabel("家族迁徙")],
+            false,
+            IV_LIN,
           ),
           segment(
             "seg-5",
@@ -128,6 +140,8 @@ export const createSeedProject = (): ProjectData => {
             3,
             { dialect: true, properNoun: true },
             [byLabel("民间戏曲"), byLabel("码头生活")],
+            false,
+            IV_LIN,
           ),
           segment(
             "seg-6",
@@ -138,6 +152,8 @@ export const createSeedProject = (): ProjectData => {
             4,
             { dialect: true },
             [byLabel("家族迁徙"), byLabel("1949 年返乡")],
+            false,
+            IV_LIN,
           ),
           segment(
             "seg-7",
@@ -148,6 +164,8 @@ export const createSeedProject = (): ProjectData => {
             2,
             { lowConfidence: true, properNoun: true },
             [byLabel("林有德"), byLabel("码头生活")],
+            false,
+            IV_CHEN,
           ),
           segment(
             "seg-8",
@@ -158,6 +176,8 @@ export const createSeedProject = (): ProjectData => {
             4,
             { dialect: true },
             [byLabel("民间戏曲"), byLabel("1956 年文艺汇演")],
+            false,
+            IV_LIN,
           ),
         ],
       },
@@ -170,11 +190,11 @@ export const createSeedProject = (): ProjectData => {
           segment("fy-1", 16.4, 31.5, "sp-lin", "天未光就有拖车声，吱呀吱呀。彼时讲“起水”，趁潮水卸货。", 2, {
             dialect: true,
             lowConfidence: true,
-          }, [byLabel("码头生活")]),
+          }, [byLabel("码头生活")], false, IV_LIN),
           segment("fy-2", 66.7, 84.1, "sp-lin", "是啦。船帮人讲的话我半听半猜，只记着伊侬唱调，后尾才知叫“甬剧”。", 3, {
             dialect: true,
             properNoun: true,
-          }, [byLabel("民间戏曲"), byLabel("码头生活")]),
+          }, [byLabel("民间戏曲"), byLabel("码头生活")], false, IV_LIN),
         ],
       },
       {
@@ -183,11 +203,75 @@ export const createSeedProject = (): ProjectData => {
         language: "English",
         status: "待校对",
         segments: [
-          segment("en-1", 7.2, 15.8, "sp-interviewer", "Grandma, what was the earliest sound you heard by the docks when you were a child?", 5, {}, [byLabel("码头生活")]),
-          segment("en-2", 16.4, 32.9, "sp-lin", "Before dawn, carts creaked along the quay. People said “qi shui”, meaning unloading with the tide.", 4, {}, [byLabel("码头生活")]),
+          segment("en-1", 7.2, 15.8, "sp-interviewer", "Grandma, what was the earliest sound you heard by the docks when you were a child?", 5, {}, [byLabel("码头生活")], false, IV_LIN),
+          segment("en-2", 16.4, 32.9, "sp-lin", "Before dawn, carts creaked along the quay. People said “qi shui”, meaning unloading with the tide.", 4, {}, [byLabel("码头生活")], false, IV_LIN),
         ],
       },
     ],
-    updatedAt: new Date().toISOString(),
+    interviewProjects: [
+      { id: "proj-matou", name: "榕城码头记忆", intervieweeId: IV_LIN },
+      { id: "proj-chen", name: "码头旁述人口述", intervieweeId: IV_CHEN },
+    ],
+    interviewees: [
+      { id: IV_LIN, name: "林阿婆", projectId: "proj-matou" },
+      { id: IV_CHEN, name: "陈师傅", projectId: "proj-chen" },
+    ],
+    authorizations: {
+      // 有效授权：带一条禁提词。
+      [IV_LIN]: {
+        intervieweeId: IV_LIN,
+        status: "valid",
+        scope: "仅限公开摘编学术使用",
+        grantedAt: "2026-08-20T09:00:00.000Z",
+        bannedTerms: ["德国座钟"],
+        updatedAt: now,
+      },
+      // 授权已收回：其已编入段落应退回待处理。
+      [IV_CHEN]: {
+        intervieweeId: IV_CHEN,
+        status: "revoked",
+        scope: "仅限内部研究",
+        grantedAt: "2026-08-21T09:00:00.000Z",
+        revokedAt: "2026-09-10T09:00:00.000Z",
+        bannedTerms: [],
+        updatedAt: now,
+      },
+    },
+    digest: {
+      id: "digest-1007",
+      title: "榕城码头记忆·公开摘编（试编）",
+      entries: [
+        {
+          segmentKey: "track-zh/seg-2",
+          trackId: "track-zh",
+          segmentId: "seg-2",
+          intervieweeId: IV_LIN,
+          status: "published",
+          addedAt: "2026-09-01T08:00:00.000Z",
+        },
+        {
+          segmentKey: "track-zh/seg-5",
+          trackId: "track-zh",
+          segmentId: "seg-5",
+          intervieweeId: IV_LIN,
+          status: "published",
+          addedAt: "2026-09-01T08:00:00.000Z",
+        },
+        // 陈师傅授权已收回，此段在同步时应退回待处理；此处先作为待退回样例。
+        {
+          segmentKey: "track-zh/seg-7",
+          trackId: "track-zh",
+          segmentId: "seg-7",
+          intervieweeId: IV_CHEN,
+          status: "pending",
+          addedAt: "2026-09-02T08:00:00.000Z",
+          returnedReason: "授权已收回",
+          returnedAt: "2026-09-10T09:05:00.000Z",
+        },
+      ],
+      updatedAt: now,
+    },
+    lastReconcile: null,
+    updatedAt: now,
   };
 };
