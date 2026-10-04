@@ -13,8 +13,31 @@ import {
   untrack,
 } from "solid-js";
 import { createSeedProject, uid } from "../data";
-import { downloadText, formatTime, loadProject, parseTime, saveProject } from "../persistence";
-import type { Confidence, PersistedEnvelope, ProjectData, Segment, TranscriptTrack } from "../types";
+import {
+  compileExcerpts,
+  reconcileParagraphs,
+  retryAuthorizationChange,
+} from "../domain/excerpts";
+import ExcerptDialog from "../components/excerpt-dialog";
+import {
+  downloadText,
+  ensureAuthorizationLedger,
+  formatTime,
+  loadProject,
+  parseTime,
+  saveAuthorizationLedger,
+  saveProject,
+} from "../persistence";
+import type {
+  AuthorizationRecord,
+  AuthorizationSyncState,
+  Confidence,
+  ExcerptParagraph,
+  PersistedEnvelope,
+  ProjectData,
+  Segment,
+  TranscriptTrack,
+} from "../types";
 
 const CHANNEL_NAME = "sologsb-1007-editor";
 const TAB_ID = uid("tab");
@@ -115,6 +138,10 @@ export default function OralHistoryEditor() {
   const [commentDraft, setCommentDraft] = createSignal("");
   const [replyDrafts, setReplyDrafts] = createSignal<Record<string, string>>({});
   const [trackFilter, setTrackFilter] = createSignal<"all" | "unreviewed" | "low">("all");
+  const [excerptOpen, setExcerptOpen] = createSignal(false);
+  const [ledger, setLedger] = createSignal<AuthorizationRecord[]>([]);
+  const [paragraphs, setParagraphs] = createSignal<ExcerptParagraph[]>([]);
+  const [syncStates, setSyncStates] = createSignal<Record<string, AuthorizationSyncState>>({});
   let editorRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
   let saveTimer: number | undefined;
@@ -343,6 +370,62 @@ export default function OralHistoryEditor() {
     });
   };
 
+  const handleCompileExcerpts = () => {
+    const entries = project().tracks.flatMap((track) =>
+      track.segments.map((segment) => ({ segment, trackId: track.id })),
+    );
+    const fresh = compileExcerpts(entries, ledger());
+    // 合并已有段落：以片段 id 去重，保留校对员的整理稿。
+    const existingBySegment = new Map(paragraphs().map((p) => [p.segmentId, p]));
+    const merged = fresh.map((p) => existingBySegment.get(p.segmentId) ?? p);
+    const { paragraphs: reconciled } = reconcileParagraphs(merged, ledger());
+    setParagraphs(reconciled);
+    setLastAction(`已编制摘编：${reconciled.filter((p) => p.status === "已编入").length} 段有效`);
+  };
+
+  const handleReconcile = () => {
+    const { paragraphs: next, suspended } = reconcileParagraphs(paragraphs(), ledger());
+    setParagraphs(next);
+    const pending = next.filter((p) => p.status === "待处理").length;
+    setLastAction(`对账完成：${next.filter((p) => p.status === "已编入").length} 段有效，${pending} 段待处理，${suspended.length} 段挂起`);
+  };
+
+  const handleDraftChange = (paragraphId: string, draft: string) => {
+    setParagraphs((items) => items.map((p) => (p.id === paragraphId ? { ...p, draft } : p)));
+  };
+
+  const handleRetry = async (intervieweeId: string) => {
+    const record = ledger().find((item) => item.intervieweeId === intervieweeId);
+    if (!record) return;
+    const previous = syncStates()[intervieweeId] ?? { intervieweeId, status: "idle", attempts: 0 };
+    // 只重试这一位受访人；其他人与校对稿不在此触碰。
+    const result = await retryAuthorizationChange(
+      intervieweeId,
+      { state: record.state, sealedUntil: record.sealedUntil },
+      async (change) => {
+        // 模拟征集科同步：10% 概率失败，仅用于演示按受访人重试。
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        if (Math.random() < 0.1) throw new Error("征集科服务暂不可用");
+        setLedger((items) => {
+          const next = items.map((item) =>
+            item.intervieweeId === intervieweeId
+              ? { ...item, state: change.state, sealedUntil: change.sealedUntil ?? null, updatedAt: new Date().toISOString() }
+              : item,
+          );
+          saveAuthorizationLedger(next);
+          return next;
+        });
+      },
+      previous,
+    );
+    setSyncStates((items) => ({ ...items, [intervieweeId]: result }));
+    if (result.status === "succeeded") {
+      const { paragraphs: next } = reconcileParagraphs(paragraphs(), ledger());
+      setParagraphs(next);
+      setLastAction(`已重试受访人 ${record.intervieweeName} 的授权同步`);
+    }
+  };
+
   const resolveConflict = (useIncoming: boolean) => {
     const incoming = conflict();
     if (!incoming) return;
@@ -363,6 +446,7 @@ export default function OralHistoryEditor() {
 
   onMount(() => {
     hydrated = true;
+    setLedger(ensureAuthorizationLedger());
     const handleOnline = () => setOnline(true);
     const handleOffline = () => setOnline(false);
     const handleStorage = (event: StorageEvent) => {
@@ -487,6 +571,7 @@ export default function OralHistoryEditor() {
         </div>
         <div class="top-actions">
           <span class={`network-chip ${online() ? "online" : "offline"}`}>{online() ? "在线" : "离线可编辑"}</span>
+          <button class="btn btn-quiet" onClick={() => setExcerptOpen(true)}>公开摘编</button>
           <button class="icon-btn" title="撤销 Ctrl/Cmd+Z" disabled={!past().length} onClick={undo}>↶</button>
           <button class="icon-btn" title="重做 Ctrl/Cmd+Shift+Z" disabled={!future().length} onClick={redo}>↷</button>
           <button class="btn btn-quiet" onClick={() => setHelpOpen(true)}>快捷键 <kbd>?</kbd></button>
@@ -725,6 +810,19 @@ export default function OralHistoryEditor() {
         <span>版本 {revision() + 1} · 本地草稿</span>
         <span class="status-shortcuts">J/K 浏览　R 已校对　M 合并　? 帮助</span>
       </footer>
+
+      <ExcerptDialog
+        open={excerptOpen()}
+        onOpenChange={setExcerptOpen}
+        project={project()}
+        ledger={ledger()}
+        paragraphs={paragraphs()}
+        syncStates={syncStates()}
+        onCompile={handleCompileExcerpts}
+        onReconcile={handleReconcile}
+        onDraftChange={handleDraftChange}
+        onRetry={handleRetry}
+      />
 
       <Dialog open={helpOpen()} onOpenChange={setHelpOpen}>
         <Dialog.Portal>

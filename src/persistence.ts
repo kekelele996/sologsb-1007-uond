@@ -1,27 +1,44 @@
-import { createSeedProject } from "./data";
-import type { PersistedEnvelope, ProjectData } from "./types";
+import { createSeedAuthorizationLedger, createSeedProject } from "./data";
+import { AUTHORIZATION_LEDGER_KEY, backfillInterviewee } from "./domain/excerpts";
+import type { AuthorizationRecord, PersistedEnvelope, ProjectData } from "./types";
 
 export const STORAGE_KEY = "sologsb-1007-project-v1";
 export const SESSION_KEY = "sologsb-1007-session";
 
-export function loadProject(): { project: ProjectData; revision: number } {
+/**
+ * 升级迁移：旧稿（schema 1）片段未记受访人，升级时按访谈项目回填。
+ * 返回迁移后的 project 与 schema 版本。
+ */
+function migrateProject(raw: unknown): { project: ProjectData; schema: number } {
+  const envelope = raw as PersistedEnvelope;
+  let project = envelope.project;
+  let schema = envelope.schema ?? 1;
+  if (schema < 2) {
+    project = backfillInterviewee(project);
+    schema = 2;
+  }
+  return { project, schema };
+}
+
+export function loadProject(): { project: ProjectData; revision: number; schema: number } {
   if (typeof localStorage === "undefined") {
-    return { project: createSeedProject(), revision: 0 };
+    return { project: createSeedProject(), revision: 0, schema: 2 };
   }
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "") as PersistedEnvelope;
-    if (parsed?.schema === 1 && parsed.project?.tracks?.length) {
-      return { project: parsed.project, revision: parsed.revision ?? 0 };
+    if (parsed?.project?.tracks?.length) {
+      const { project, schema } = migrateProject(parsed);
+      return { project, revision: parsed.revision ?? 0, schema };
     }
   } catch {
     // A malformed local draft falls back to the bundled sample.
   }
-  return { project: createSeedProject(), revision: 0 };
+  return { project: createSeedProject(), revision: 0, schema: 2 };
 }
 
 export function saveProject(project: ProjectData, revision: number, tabId: string) {
   const envelope: PersistedEnvelope = {
-    schema: 1,
+    schema: 2,
     revision,
     tabId,
     savedAt: Date.now(),
@@ -37,6 +54,32 @@ export function readEnvelope(): PersistedEnvelope | null {
   } catch {
     return null;
   }
+}
+
+/** 读取授权台账（征集科维护）。没有时返回空表。 */
+export function loadAuthorizationLedger(): AuthorizationRecord[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(AUTHORIZATION_LEDGER_KEY) ?? "[]") as AuthorizationRecord[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 写入授权台账。校对员不直接调用，只由征集科同步流程写入。 */
+export function saveAuthorizationLedger(ledger: AuthorizationRecord[]) {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(AUTHORIZATION_LEDGER_KEY, JSON.stringify(ledger));
+}
+
+/** 首次使用时播种授权台账；已有台账不动。 */
+export function ensureAuthorizationLedger(): AuthorizationRecord[] {
+  const existing = loadAuthorizationLedger();
+  if (existing.length) return existing;
+  const seeded = createSeedAuthorizationLedger();
+  saveAuthorizationLedger(seeded);
+  return seeded;
 }
 
 export function downloadText(filename: string, content: string, type = "text/plain;charset=utf-8") {

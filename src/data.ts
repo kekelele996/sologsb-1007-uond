@@ -1,4 +1,4 @@
-import type { Confidence, ProjectData, Segment, Tag } from "./types";
+import type { AuthorizationRecord, Confidence, ProjectData, Segment, Tag } from "./types";
 
 export const uid = (prefix = "id") =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -58,7 +58,7 @@ export const createSeedProject = (): ProjectData => {
   const tags = [...topics, ...events, ...people];
   const byLabel = (label: string) => tags.find((tag) => tag.label === label)?.id ?? "";
 
-  return {
+  const seedProject: ProjectData = {
     id: "oral-history-1007",
     title: "榕城码头记忆：林阿婆访谈",
     interviewee: "林阿婆",
@@ -190,4 +190,46 @@ export const createSeedProject = (): ProjectData => {
     ],
     updatedAt: new Date().toISOString(),
   };
+
+  // 为示例片段分配受访人，用于演示公开摘编的三种状态：
+  // - 林阿婆：授权有效 → 已编入
+  // - 陈师傅：授权已封存 → 待处理
+  // - 林有德：征集科查无登记 → 已挂起
+  const linId = `interviewee:${seedProject.id}:林阿婆`;
+  const chenId = `interviewee:${seedProject.id}:陈师傅`;
+  const youdeId = `interviewee:${seedProject.id}:林有德`;
+  const intervieweeById: Record<string, string> = {
+    "seg-3": youdeId,
+    "seg-7": chenId,
+  };
+  for (const track of seedProject.tracks) {
+    for (const segment of track.segments) {
+      segment.intervieweeId = intervieweeById[segment.id] ?? linId;
+    }
+  }
+
+  return seedProject;
+};
+
+/** 授权台账种子：征集科维护，校对员只读。 */
+export const createSeedAuthorizationLedger = (): AuthorizationRecord[] => {
+  const now = new Date().toISOString();
+  return [
+    {
+      intervieweeId: "interviewee:oral-history-1007:林阿婆",
+      intervieweeName: "林阿婆",
+      state: "有效",
+      sealedUntil: null,
+      updatedAt: now,
+      updatedBy: "征集科",
+    },
+    {
+      intervieweeId: "interviewee:oral-history-1007:陈师傅",
+      intervieweeName: "陈师傅",
+      state: "已封存",
+      sealedUntil: "2026-12-31",
+      updatedAt: now,
+      updatedBy: "征集科",
+    },
+  ];
 };
